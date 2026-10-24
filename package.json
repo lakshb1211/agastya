@@ -1,0 +1,19 @@
+{
+  "name": "agastya-learning-universe",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "backend": "cd backend && .venv/bin/python run.py",
+    "test:backend": "cd backend && .venv/bin/python test_api.py",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.1"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0"
+  }
+}
