@@ -154,6 +154,7 @@ html[lang=hi] h1,html[lang=hi] h2,html[lang=hi] .brand-text strong{letter-spacin
 textarea.in{min-height:130px;resize:vertical}
 .b2{display:inline-flex;align-items:center;min-height:42px;padding:0 18px;border:0;border-radius:10px;background:linear-gradient(135deg,#ffe4a6,#f5cd78);color:#181426;font-family:inherit;font-weight:700;font-size:12px;cursor:pointer}
 .b2.ghost{background:rgba(245,205,120,.08);color:var(--gold);border:1px solid rgba(245,205,120,.35)}
+.b2:disabled{opacity:.55;cursor:progress}
 .vh{position:absolute;opacity:0;width:1px;height:1px;overflow:hidden}.vh:focus+.x,.vh:focus-visible~*{outline:0}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
 .note{margin-top:12px;color:var(--muted);font-size:12px;line-height:1.7}

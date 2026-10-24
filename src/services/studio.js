@@ -24,6 +24,12 @@ let backendMaterialId = null;
 let backendQuizId = null;
 let backendPlan = null;
 let backendNotes = null;
+// In-flight POST /api/materials, so quiz/ask wait for the backend copy instead of racing it
+let backendSync = null;
+// Step to open once material is ready ('quiz' | 'ask'), set when a step is requested too early
+let pendingStep = null;
+// Bumped on every new material so a stale auto-advance never fires
+let flowId = 0;
 
 export const SAMPLE_STUDY_MATERIAL = `Cellular respiration is a series of chemical reactions that break down glucose to produce ATP, the primary energy currency of cells.
 The process consists of three main stages: glycolysis, the citric acid cycle (Krebs cycle), and oxidative phosphorylation.
@@ -35,7 +41,69 @@ Photosynthesis, on the other hand, converts light energy into chemical energy st
 export function loadSampleNotes() {
   const pasteEl = document.getElementById('paste');
   if (pasteEl) pasteEl.value = SAMPLE_STUDY_MATERIAL;
-  setDoc(chunk(SAMPLE_STUDY_MATERIAL), false, SAMPLE_STUDY_MATERIAL, 'Cellular Respiration & Energy');
+  return setDoc(chunk(SAMPLE_STUDY_MATERIAL), false, SAMPLE_STUDY_MATERIAL, 'Cellular Respiration & Energy');
+}
+
+function setBusy(on) {
+  ['use', 'sampleNotesBtn'].forEach((id) => {
+    const b = $(id);
+    if (b) b.disabled = on;
+  });
+}
+
+// Opens a study step, routing through Material first when no material is loaded yet
+export function goToStep(step) {
+  if (window.go) window.go('learn');
+
+  if (step === 'pdf') {
+    switchTab('material');
+    setTimeout(() => $('pdf')?.click(), 250);
+    return;
+  }
+
+  if ((step === 'quiz' || step === 'ask') && !doc) {
+    pendingStep = step;
+    switchTab('material');
+    msg(
+      $('mstat'),
+      tr('Add your study material first. You’ll move to the next step automatically.')
+    );
+    return;
+  }
+
+  if (step === 'quiz') {
+    switchTab('quiz');
+    if (!quiz) startQuiz('d');
+    return;
+  }
+
+  if (step === 'ask') {
+    switchTab('ask');
+    setTimeout(() => $('q')?.focus(), 200);
+    return;
+  }
+
+  switchTab(step);
+}
+
+// Called once material is ready (backend or local): moves the student on to the next step
+function advanceAfterMaterial(id) {
+  setBusy(false);
+  const next = pendingStep || 'quiz';
+  pendingStep = null;
+  const mstat = $('mstat');
+  if (mstat) {
+    mstat.insertAdjacentHTML(
+      'beforeend',
+      `<p class="note okm">✦ ${tr(
+        next === 'ask' ? 'Opening Ask…' : 'Starting your diagnostic quiz…'
+      )}</p>`
+    );
+  }
+  setTimeout(() => {
+    if (id !== flowId) return;
+    goToStep(next);
+  }, 1400);
 }
 
 export function getBackendMaterialId() {
@@ -174,14 +242,28 @@ function analyse(pages) {
   return { S, N, idf, topics, kw: kw.slice(0, 14), used: new Set() };
 }
 
+// Concept map + core principles from the backend's short_notes
+function notesHtml(notes) {
+  if (!notes) return '';
+  let html = '';
+  if (notes.visual && notes.visual.svg) {
+    html += `<div class="concept-map-wrap" style="margin-top:14px;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:#0d1127;">${notes.visual.svg}</div>`;
+  }
+  if (notes.key_points && notes.key_points.length) {
+    html += `<div class="keypoints-wrap" style="margin-top:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:12px 16px;"><b style="color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">✦ ${tr('Core Principles')}</b><ul style="margin:8px 0 0 18px;font-size:12px;line-height:1.6;color:var(--muted);">${notes.key_points.slice(0, 4).map((p) => `<li>${h(p.text)} <i style="color:var(--gold);font-size:10px;">(${p.citations.join(', ')})</i></li>`).join('')}</ul></div>`;
+  }
+  return html;
+}
+
 export function setDoc(pages, pdf, rawContent = null, title = null) {
   const a = analyse(pages);
   const mstat = $('mstat');
 
   if (a.N < 4 || a.topics.length < 2) {
     doc = null;
-    msg(mstat, tr('Add more material: at least a few full sentences are needed.'));
-    return;
+    setBusy(false);
+    msg(mstat, tr('Add more material: at least a few full sentences are needed.'), ' no');
+    return Promise.resolve();
   }
 
   a.unit = pdf ? tr('Page') : tr('Passage');
@@ -195,6 +277,14 @@ export function setDoc(pages, pdf, rawContent = null, title = null) {
   backendQuizId = null;
   backendPlan = null;
   backendNotes = null;
+  backendSync = null;
+  const id = ++flowId;
+
+  // Clear the previous material's quiz, plan and answer
+  ['qstage', 'pout', 'aout'].forEach((k) => {
+    const el = $(k);
+    if (el) el.innerHTML = '';
+  });
 
   const user = getCurrentUser();
   syncActiveStreak(user).then(renderDyn);
@@ -209,35 +299,46 @@ export function setDoc(pages, pdf, rawContent = null, title = null) {
       .join('')}</div>`
   );
 
-  // Sync to Agastya Backend API asynchronously
-  if (rawContent) {
-    apiCreateMaterial(rawContent, a.title)
-      .then((res) => {
-        backendMaterialId = res.id;
-        backendPlan = res.study_plan;
-        backendNotes = res.short_notes;
-
-        let extraVisual = '';
-        if (res.short_notes && res.short_notes.visual && res.short_notes.visual.svg) {
-          extraVisual += `<div class="concept-map-wrap" style="margin-top:14px;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,0.08);background:#0d1127;">${res.short_notes.visual.svg}</div>`;
-        }
-        if (res.short_notes && res.short_notes.key_points && res.short_notes.key_points.length) {
-          extraVisual += `<div class="keypoints-wrap" style="margin-top:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);border-radius:12px;padding:12px 16px;"><b style="color:var(--gold);font-size:12px;letter-spacing:1px;text-transform:uppercase;">✦ ${tr('Core Principles')}</b><ul style="margin:8px 0 0 18px;font-size:12px;line-height:1.6;color:var(--muted);">${res.short_notes.key_points.slice(0, 4).map(p => `<li>${h(p.text)} <i style="color:var(--gold);font-size:10px;">(${p.citations.join(', ')})</i></li>`).join('')}</ul></div>`;
-        }
-
-        out(
-          mstat,
-          `<span>${tr('Material loaded.')}</span> <b>${a.N}</b> <span>${tr('sentences')}</span> · <b>${
-            res.topics ? res.topics.length : a.topics.length
-          }</b> <span>${tr('key topics')}</span><div>${(res.topics || a.topics)
-            .map((t) => `<i class="chip dyn">${h(cap(t))}</i>`)
-            .join('')}</div>${extraVisual}`
-        );
-      })
-      .catch((err) => {
-        console.warn('Backend material sync notice (running local mode):', err);
-      });
+  if (!rawContent) {
+    advanceAfterMaterial(id);
+    return Promise.resolve();
   }
+
+  // Sync to Agastya Backend API; quiz/ask/plan wait on this promise
+  setBusy(true);
+  if (mstat) {
+    mstat.insertAdjacentHTML(
+      'beforeend',
+      `<p class="note">✦ ${tr('Analysing your material…')}</p>`
+    );
+  }
+  backendSync = apiCreateMaterial(rawContent, a.title)
+    .then((res) => {
+      if (id !== flowId) return;
+      backendMaterialId = res.id;
+      backendPlan = res.study_plan;
+      backendNotes = res.short_notes;
+
+      const extraVisual = notesHtml(res.short_notes);
+
+      out(
+        mstat,
+        `<span>${tr('Material loaded.')}</span> <b>${a.N}</b> <span>${tr('sentences')}</span> · <b>${
+          res.topics ? res.topics.length : a.topics.length
+        }</b> <span>${tr('key topics')}</span><div>${(res.topics || a.topics)
+          .map((t) => `<i class="chip dyn">${h(cap(t))}</i>`)
+          .join('')}</div>${extraVisual}`
+      );
+    })
+    .catch((err) => {
+      console.warn('Backend material sync notice (running local mode):', err);
+    })
+    .finally(() => {
+      if (id !== flowId) return;
+      backendSync = null;
+      advanceAfterMaterial(id);
+    });
+  return backendSync;
 }
 
 function ensurePdf(ok, bad) {
@@ -290,11 +391,16 @@ export async function askQuestion() {
     const b = $('ask-load-sample');
     if (b) {
       b.onclick = () => {
-        loadSampleNotes();
-        setTimeout(askQuestion, 350);
+        pendingStep = 'ask';
+        loadSampleNotes().then(askQuestion);
       };
     }
     return;
+  }
+
+  if (backendSync) {
+    msg(o, tr('Analysing your material…'));
+    await backendSync;
   }
 
   // Attempt grounded Q&A via Agastya Backend API first
@@ -307,7 +413,7 @@ export async function askQuestion() {
           o,
           `<div class="ans"><b>${tr('In simple words')}</b><ul><li><span class="dyn">${h(
             res.answer
-          )}</span><span class="ref"><i>Source</i> ${res.sources.join(', ')}</span></li></ul></div>`
+          )}</span><span class="ref"><i>Source</i> ${res.sources.join(', ')}</span></li></ul><div class="row"><button class="b2 ghost" data-act="retake">${tr('Test yourself with a quiz')} →</button></div></div>`
         );
       } else {
         return msg(
@@ -371,7 +477,7 @@ export async function askQuestion() {
             : ''
         }</li>`;
       })
-      .join('')}</ul></div>`
+      .join('')}</ul><div class="row"><button class="b2 ghost" data-act="retake">${tr('Test yourself with a quiz')} →</button></div></div>`
   );
 }
 
@@ -431,7 +537,17 @@ function gen(n, only) {
 
 export async function startQuiz(kind = 'd', only = null) {
   const st = $('qstage');
-  if (!doc) return msg(st, tr('Add your material first.'), ' no');
+  if (!doc) {
+    return out(
+      st,
+      `<div class="ans no"><span>${tr('Add your material first.')}</span><div class="row"><button class="b2 ghost" data-act="material">${tr('Add material')} →</button></div></div>`
+    );
+  }
+
+  if (backendSync) {
+    msg(st, tr('Analysing your material…'));
+    await backendSync;
+  }
 
   // Try creating an advanced cited quiz via Backend API if connected
   if (backendMaterialId) {
@@ -503,8 +619,63 @@ export async function startQuiz(kind = 'd', only = null) {
   );
 }
 
+// Score card with the buttons that lead to the next step
+function renderResult(score, total, weak) {
+  const pct = total ? Math.round((score / total) * 100) : 0;
+  out(
+    $('qres'),
+    `<div class="ans"><b>${tr('Score')}</b>: <span class="dyn">${score} / ${total} (${pct}%)</span><br><b>${tr(
+      'Weak topics'
+    )}</b>: ${
+      weak.length
+        ? weak.map((t) => `<i class="chip dyn">${h(cap(t))}</i>`).join('')
+        : `<span>${tr('No weak topics. Great work!')}</span>`
+    }<div class="row"><button class="b2" data-act="plan">${tr('See revision plan')} →</button>${
+      weak.length
+        ? `<button class="b2 ghost" data-act="practice">${tr('Practise weak topics')}</button>`
+        : `<button class="b2 ghost" data-act="retake">${tr('Retake the quiz')}</button>`
+    }<button class="b2 ghost" data-act="progress">${tr('View progress')}</button></div></div>`
+  );
+
+  renderDyn();
+  const qres = $('qres');
+  if (qres) qres.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function lockQuiz() {
+  document.querySelectorAll('#qstage input').forEach((x) => (x.disabled = true));
+  const sb = document.querySelector('[data-act=submit]');
+  if (sb) sb.remove();
+}
+
 export async function submitQuiz() {
   if (!quiz) return;
+
+  // Every question must be answered before grading
+  const missing = [];
+  quiz.qs.forEach((q, i) => {
+    const answered = !!document.querySelector(`input[name=r${i}]:checked`);
+    const b = $('qq' + i);
+    if (b) b.classList.toggle('bad', !answered);
+    if (!answered) missing.push(i);
+  });
+  if (missing.length) {
+    msg(
+      $('qres'),
+      `${tr('Answer every question before submitting.')} (${missing.length} ${tr('left')})`,
+      ' no'
+    );
+    $('qq' + missing[0])?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
+
+  const sb = document.querySelector('[data-act=submit]');
+  if (sb) {
+    sb.disabled = true;
+    sb.textContent = tr('Checking…');
+  }
+
+  const user = getCurrentUser();
 
   // Handle Backend API quiz submission
   if (quiz.isBackend && backendQuizId) {
@@ -536,11 +707,8 @@ export async function submitQuiz() {
         }
       });
 
-      document.querySelectorAll('#qstage input').forEach((x) => (x.disabled = true));
-      const sb = document.querySelector('[data-act=submit]');
-      if (sb) sb.remove();
+      lockQuiz();
 
-      const user = getCurrentUser();
       const attempt = {
         d: Date.now(),
         k: quiz.k,
@@ -559,26 +727,16 @@ export async function submitQuiz() {
 
       last = { weak: res.weak_areas || [] };
       quiz = null;
-
-      out(
-        $('qres'),
-        `<div class="ans"><b>${tr('Score')}</b>: <span class="dyn">${res.score} / ${
-          res.total
-        } (${res.accuracy_percent}%)</span><br><b>${tr('Weak topics')}</b>: ${
-          res.weak_areas && res.weak_areas.length
-            ? res.weak_areas.map((t) => `<i class="chip dyn">${h(cap(t))}</i>`).join('')
-            : `<span>${tr('No weak topics. Great work!')}</span>`
-        }<div class="row"><button class="b2" data-act="plan">${tr(
-          'See revision plan'
-        )}</button></div></div>`
-      );
-
-      renderDyn();
-      const qres = $('qres');
-      if (qres) qres.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      renderResult(res.score, res.total, last.weak);
       return;
     } catch (e) {
       console.warn('Backend quiz submit error, falling back to local grading:', e);
+      // Backend questions carry option indexes, not answers, so they can't be graded locally
+      if (sb) {
+        sb.disabled = false;
+        sb.textContent = tr('Submit answers');
+      }
+      return msg($('qres'), tr('Couldn’t reach the server to grade your quiz. Please try again.'), ' no');
     }
   }
 
@@ -610,11 +768,8 @@ export async function submitQuiz() {
     }
   });
 
-  document.querySelectorAll('#qstage input').forEach((x) => (x.disabled = true));
-  const sb = document.querySelector('[data-act=submit]');
-  if (sb) sb.remove();
+  lockQuiz();
 
-  const user = getCurrentUser();
   const attempt = {
     d: Date.now(),
     k: quiz.k,
@@ -629,35 +784,42 @@ export async function submitQuiz() {
   const weak = Object.keys(tp).filter((k) => tp[k][0] / tp[k][1] < 0.7);
   last = { weak };
   quiz = null;
-
-  out(
-    $('qres'),
-    `<div class="ans"><b>${tr('Score')}</b>: <span class="dyn">${r} / ${
-      attempt.t
-    }</span><br><b>${tr('Weak topics')}</b>: ${
-      weak.length
-        ? weak.map((t) => `<i class="chip dyn">${h(cap(t))}</i>`).join('')
-        : `<span>${tr('No weak topics. Great work!')}</span>`
-    }<div class="row"><button class="b2" data-act="plan">${tr(
-      'See revision plan'
-    )}</button></div></div>`
-  );
-
-  renderDyn();
-  const qres = $('qres');
-  if (qres) qres.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  renderResult(r, attempt.t, weak);
 }
 
 // ---------------- Revision Plan & Progress ----------------
-export function renderPlan() {
+// Buttons that end the plan: practise weak topics if any, otherwise retake, plus ask a doubt
+function planNext() {
+  const weak = last && last.weak && last.weak.length;
+  return `<div class="row">${
+    weak
+      ? `<button class="b2" data-act="practice">${tr('Practise weak topics')} →</button>`
+      : `<button class="b2" data-act="retake">${tr(last ? 'Retake the quiz' : 'Start diagnostic quiz')} →</button>`
+  }<button class="b2 ghost" data-act="ask">${tr('Ask a doubt')}</button></div>`;
+}
+
+export async function renderPlan() {
   const el = $('pout');
   if (!el) return;
+
+  if (!doc) {
+    return out(
+      el,
+      `<p class="note"><span>${tr('Add your study material first.')}</span></p><div class="row"><button class="b2" data-act="material">${tr('Add material')} →</button></div>`
+    );
+  }
+
+  if (backendSync) {
+    msg(el, tr('Analysing your material…'));
+    await backendSync;
+  }
 
   // Use rich personalized backend plan if available
   if (backendPlan && backendPlan.schedule && backendPlan.schedule.length) {
     return out(
       el,
       `<h3>${tr('Your revision plan')} — ${h(backendPlan.title || 'Study Plan')}</h3>
+       ${last && last.weak.length ? `<div class="note"><b>${tr('Focus first on')}</b>: ${last.weak.map((t) => `<i class="chip dyn">${h(cap(t))}</i>`).join('')}</div>` : ''}
        <p class="note" style="margin-bottom:14px;">${h(backendPlan.study_method || 'Follow this structured schedule.')}</p>
        ${backendPlan.schedule
          .map(
@@ -668,23 +830,22 @@ export function renderPlan() {
            </div>`
          )
          .join('')}
-       <div class="row"><button class="b2" data-act="practice">${tr(
-         'Practise weak topics'
-       )}</button></div>`
+       ${notesHtml(backendNotes)}
+       ${planNext()}`
     );
   }
 
-  if (!doc || !last) {
+  if (!last) {
     return out(
       el,
       `<p class="note"><span>${tr(
         'Take the diagnostic quiz first. Your plan is built from your weak topics.'
-      )}</span></p>`
+      )}</span></p>${planNext()}`
     );
   }
 
   if (!last.weak.length) {
-    return msg(el, tr('No weak topics. Great work!'));
+    return out(el, `<div class="ans"><span>${tr('No weak topics. Great work!')}</span></div>${planNext()}`);
   }
 
   out(
@@ -707,9 +868,7 @@ export function renderPlan() {
           'Retake the quiz'
         )}</span></div></div>`;
       })
-      .join('')}<div class="row"><button class="b2" data-act="practice">${tr(
-      'Practise weak topics'
-    )}</button></div>`
+      .join('')}${planNext()}`
   );
 }
 
@@ -723,7 +882,7 @@ export async function renderProgress() {
   if (!a.length) {
     return out(
       el,
-      `<p class="note"><span>${tr('No attempts yet. Take a quiz to see your progress.')}</span></p>`
+      `<p class="note"><span>${tr('No attempts yet. Take a quiz to see your progress.')}</span></p><div class="row"><button class="b2" data-act="retake">${tr('Start diagnostic quiz')} →</button></div>`
     );
   }
 
@@ -758,9 +917,9 @@ export async function renderProgress() {
             }${d}%</span></p>`;
           })()
         : '') +
-      `<div class="row"><button class="b2 ghost" data-act="clear">${tr(
-        'Clear history'
-      )}</button></div>`
+      `<div class="row"><button class="b2" data-act="progress">${tr(
+        'Open full dashboard'
+      )} →</button><button class="b2 ghost" data-act="clear">${tr('Clear history')}</button></div>`
   );
 }
 
@@ -782,22 +941,36 @@ export function initStudio() {
     useBtn.addEventListener('click', () => {
       const pasteEl = $('paste');
       const t = pasteEl ? pasteEl.value.trim() : '';
-      if (t) setDoc(chunk(t), false, t, 'Pasted Study Notes');
+      if (!t) {
+        msg($('mstat'), tr('Paste your notes above, choose a PDF, or load the sample notes.'), ' no');
+        pasteEl?.focus();
+        return;
+      }
+      setDoc(chunk(t), false, t, 'Pasted Study Notes');
     });
   }
+
+  const sampleBtn = $('sampleNotesBtn');
+  if (sampleBtn) sampleBtn.addEventListener('click', () => loadSampleNotes());
 
   const pdfInput = $('pdf');
   if (pdfInput) {
     pdfInput.addEventListener('change', (e) => {
       const f = e.target.files[0];
+      // Reset so choosing the same file again still fires 'change'
+      e.target.value = '';
       if (!f) return;
+      setBusy(true);
       msg($('mstat'), tr('Reading your PDF…'));
 
-      const bad = () =>
+      const bad = () => {
+        setBusy(false);
         msg(
           $('mstat'),
-          tr('Couldn’t read text from this PDF. If it is a scanned image, paste the text instead.')
+          tr('Couldn’t read text from this PDF. If it is a scanned image, paste the text instead.'),
+          ' no'
         );
+      };
 
       const r = new FileReader();
       r.onerror = bad;
@@ -865,6 +1038,15 @@ export function initStudio() {
       } else if (k === 'practice') {
         switchTab('quiz');
         startQuiz('p', last && last.weak);
+      } else if (k === 'retake') {
+        switchTab('quiz');
+        startQuiz('d');
+      } else if (k === 'material') {
+        goToStep('quiz');
+      } else if (k === 'ask') {
+        goToStep('ask');
+      } else if (k === 'progress') {
+        window.go('progress');
       } else if (k === 'clear') {
         const user = getCurrentUser();
         clearAllAttempts(user).then(() => {
@@ -875,7 +1057,18 @@ export function initStudio() {
     });
   }
 
+  // Clear the "unanswered" highlight as soon as a question gets an answer
+  const qstage = $('qstage');
+  if (qstage) {
+    qstage.addEventListener('change', (e) => {
+      const qq = e.target.closest('.qq');
+      if (qq && quiz) qq.classList.remove('bad');
+    });
+  }
+
   window.renderDyn = renderDyn;
+  window.switchTab = switchTab;
+  window.goToStep = goToStep;
   renderDyn();
 }
 

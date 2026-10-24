@@ -126,19 +126,10 @@ export function initStars() {
         }, 2200);
 
         const act = b.getAttribute('data-action');
-        if (act === 'ask') {
-          if (window.go) window.go('learn');
-          if (window.switchTab) window.switchTab('ask');
-          setTimeout(() => document.getElementById('q')?.focus(), 200);
-        } else if (act === 'quiz') {
-          if (window.go) window.go('learn');
-          if (window.switchTab) window.switchTab('quiz');
-        } else if (act === 'pdf') {
-          if (window.go) window.go('learn');
-          if (window.switchTab) window.switchTab('material');
-          setTimeout(() => document.getElementById('pdf')?.click(), 250);
-        } else if (act === 'progress') {
+        if (act === 'progress') {
           if (window.go) window.go('progress');
+        } else if (window.goToStep) {
+          window.goToStep(act);
         }
       });
     });

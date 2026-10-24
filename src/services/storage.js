@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
+import { apiGetStreak, apiPingStreak } from './api.js';
 
 const SK = 'agastya-streak';
 const AK = 'agastya-attempts';
@@ -37,6 +38,17 @@ export function dd(a) {
 }
 
 export async function fetchStreak(user = null) {
+  if (user && user.isBackend) {
+    try {
+      const res = await apiGetStreak();
+      const streakObj = { n: res.streak_count, last: res.last_active_date };
+      sv(SK, streakObj);
+      return streakObj;
+    } catch (e) {
+      console.warn('Backend fetchStreak error, falling back to local:', e);
+    }
+  }
+
   if (isSupabaseConfigured && user) {
     try {
       const { data, error } = await supabase
@@ -64,6 +76,17 @@ export async function fetchStreak(user = null) {
 }
 
 export async function syncActiveStreak(user = null) {
+  if (user && user.isBackend) {
+    try {
+      const res = await apiPingStreak();
+      const streakObj = { n: res.streak_count, last: res.last_active_date };
+      sv(SK, streakObj);
+      return streakObj;
+    } catch (e) {
+      console.warn('Backend streak ping error, using local streak:', e);
+    }
+  }
+
   const s = ls(SK, { n: 0, last: null });
   const d = s.last ? dd(s.last) : null;
 

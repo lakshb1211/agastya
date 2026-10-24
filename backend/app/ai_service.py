@@ -11,6 +11,8 @@ from .config import (
     OPENAI_BASE_URL,
     OPENAI_MODEL,
     GEMINI_API_KEY,
+    GEMINI_MODEL,
+    GEMINI_FALLBACK_MODELS,
     LANGUAGES,
     LANG_ALIASES,
 )
@@ -34,37 +36,45 @@ def normalize_language(lang: str) -> str:
         return lang
     return "english"
 
+def _gemini_output_text(data: Dict[str, Any]) -> Optional[str]:
+    # Interactions API: text lives in the "model_output" step, after any "thought" steps
+    for step in data.get("steps", []):
+        if step.get("type") == "model_output":
+            texts = [c.get("text", "") for c in step.get("content", []) if c.get("type") == "text"]
+            text = "".join(texts).strip()
+            if text:
+                return text
+    return None
+
 def ask_gemini_raw(prompt: str, system_prompt: Optional[str] = None) -> Optional[str]:
     if not GEMINI_API_KEY:
         return None
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    contents = []
-    if system_prompt:
-        contents.append({"role": "user", "parts": [{"text": f"System Instructions: {system_prompt}"}]})
-        contents.append({"role": "model", "parts": [{"text": "Understood. I will strictly follow these instructions."}]})
-    contents.append({"role": "user", "parts": [{"text": prompt}]})
+    url = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
-    payload = {
-        "contents": contents,
-        "generationConfig": {
-            "temperature": 0.2,
-            "maxOutputTokens": 2048,
-        },
-    }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        candidates = data.get("candidates", [])
-        if candidates and candidates[0].get("content", {}).get("parts"):
-            return candidates[0]["content"]["parts"][0].get("text", "").strip()
-    except Exception as exc:
-        logger.warning(f"Gemini API request failed: {exc}")
+    for model in [GEMINI_MODEL] + [m for m in GEMINI_FALLBACK_MODELS if m != GEMINI_MODEL]:
+        payload: Dict[str, Any] = {"model": model, "input": prompt}
+        if system_prompt:
+            payload["system_instruction"] = system_prompt
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "x-goog-api-key": GEMINI_API_KEY},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            text = _gemini_output_text(data)
+            if text:
+                return text
+            logger.warning(f"Gemini ({model}) returned no text output.")
+        except urllib.error.HTTPError as exc:
+            logger.warning(f"Gemini API request failed ({model}): {exc}")
+            if exc.code == 503:
+                continue  # overloaded: try the next model
+        except Exception as exc:
+            logger.warning(f"Gemini API request failed ({model}): {exc}")
+        return None
     return None
 
 def ask_openai_raw(prompt: str, system_prompt: Optional[str] = None) -> Optional[str]:

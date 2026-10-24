@@ -1,6 +1,6 @@
 import { fetchAttempts, fetchStreak } from './storage.js';
 import { getCurrentUser } from './auth.js';
-import { h, cap, switchTab, startQuiz, getStudioDoc } from './studio.js';
+import { h, cap, switchTab, startQuiz, getStudioDoc, goToStep } from './studio.js';
 import { applyLanguage, tr } from './i18n.js';
 
 const $ = (i) => document.getElementById(i);
@@ -68,10 +68,7 @@ export async function renderDashboard() {
       </div>`;
     const dgo = $('dgo');
     if (dgo) {
-      dgo.onclick = () => {
-        switchTab('quiz');
-        window.go('learn');
-      };
+      dgo.onclick = () => goToStep('quiz');
     }
     return;
   }
@@ -211,14 +208,13 @@ export async function renderDashboard() {
   const pr = $('dpr');
   if (pr) {
     pr.onclick = () => {
-      switchTab('quiz');
-      if (getStudioDoc()) {
-        startQuiz(
-          'p',
-          weak.map((w) => w.k)
-        );
-      }
+      if (!getStudioDoc()) return goToStep('quiz');
       window.go('learn');
+      switchTab('quiz');
+      startQuiz(
+        'p',
+        weak.map((w) => w.k)
+      );
     };
   }
 }
