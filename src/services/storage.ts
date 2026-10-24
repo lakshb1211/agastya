@@ -1,12 +1,12 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
-import { apiGetStreak, apiPingStreak } from './api.js';
+import { apiGetStreak, apiPingStreak } from './api';
+import { User, Streak, Attempt, ActiveDoc } from '../types';
 
 const SK = 'agastya-streak';
 const AK = 'agastya-attempts';
 const MK = 'agastya-materials';
 
-// Helper for local storage
-function ls(k, d) {
+function ls<T>(k: string, d: T): T {
   try {
     const v = localStorage.getItem(k);
     if (v) return JSON.parse(v);
@@ -16,7 +16,7 @@ function ls(k, d) {
   return d;
 }
 
-function sv(k, v) {
+function sv<T>(k: string, v: T) {
   try {
     localStorage.setItem(k, JSON.stringify(v));
   } catch (e) {
@@ -24,24 +24,23 @@ function sv(k, v) {
   }
 }
 
-// ---------------- STREAKS ----------------
-export function ymd(d) {
+export function ymd(d: Date): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-export function dd(a) {
+export function dd(a: string): number {
   const p = a.split('-');
   const t = new Date();
   return Math.round(
-    (new Date(t.getFullYear(), t.getMonth(), t.getDate()) - new Date(+p[0], p[1] - 1, +p[2])) / 864e5
+    (new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime() - new Date(+p[0], Number(p[1]) - 1, +p[2]).getTime()) / 864e5
   );
 }
 
-export async function fetchStreak(user = null) {
+export async function fetchStreak(user: User | null = null): Promise<Streak> {
   if (user && user.isBackend) {
     try {
       const res = await apiGetStreak();
-      const streakObj = { n: res.streak_count, last: res.last_active_date };
+      const streakObj: Streak = { n: res.streak_count, last: res.last_active_date };
       sv(SK, streakObj);
       return streakObj;
     } catch (e) {
@@ -58,7 +57,7 @@ export async function fetchStreak(user = null) {
         .maybeSingle();
 
       if (!error && data) {
-        const streakObj = { n: data.streak_count, last: data.last_active_date };
+        const streakObj: Streak = { n: data.streak_count, last: data.last_active_date };
         sv(SK, streakObj);
         return streakObj;
       }
@@ -67,7 +66,7 @@ export async function fetchStreak(user = null) {
     }
   }
 
-  const s = ls(SK, { n: 0, last: null });
+  const s = ls<Streak>(SK, { n: 0, last: null });
   if (s.last && dd(s.last) > 1 && s.n) {
     s.n = 0;
     sv(SK, s);
@@ -75,11 +74,11 @@ export async function fetchStreak(user = null) {
   return s;
 }
 
-export async function syncActiveStreak(user = null) {
+export async function syncActiveStreak(user: User | null = null): Promise<Streak> {
   if (user && user.isBackend) {
     try {
       const res = await apiPingStreak();
-      const streakObj = { n: res.streak_count, last: res.last_active_date };
+      const streakObj: Streak = { n: res.streak_count, last: res.last_active_date };
       sv(SK, streakObj);
       return streakObj;
     } catch (e) {
@@ -87,7 +86,7 @@ export async function syncActiveStreak(user = null) {
     }
   }
 
-  const s = ls(SK, { n: 0, last: null });
+  const s = ls<Streak>(SK, { n: 0, last: null });
   const d = s.last ? dd(s.last) : null;
 
   if (d === 0) return s;
@@ -112,8 +111,7 @@ export async function syncActiveStreak(user = null) {
   return s;
 }
 
-// ---------------- QUIZ ATTEMPTS ----------------
-export async function fetchAttempts(user = null) {
+export async function fetchAttempts(user: User | null = null): Promise<Attempt[]> {
   if (isSupabaseConfigured && user) {
     try {
       const { data, error } = await supabase
@@ -123,8 +121,7 @@ export async function fetchAttempts(user = null) {
         .order('created_at', { ascending: true });
 
       if (!error && data) {
-        // Map database columns to app internal format
-        const mapped = data.map((x) => ({
+        const mapped: Attempt[] = data.map((x: any) => ({
           d: new Date(x.created_at).getTime(),
           k: x.quiz_type,
           s: x.score,
@@ -140,11 +137,11 @@ export async function fetchAttempts(user = null) {
     }
   }
 
-  return ls(AK, []);
+  return ls<Attempt[]>(AK, []);
 }
 
-export async function recordAttempt(attempt, user = null) {
-  const localList = ls(AK, []);
+export async function recordAttempt(attempt: Attempt, user: User | null = null): Promise<Attempt[]> {
+  const localList = ls<Attempt[]>(AK, []);
   localList.push(attempt);
   sv(AK, localList);
 
@@ -172,7 +169,7 @@ export async function recordAttempt(attempt, user = null) {
   return localList;
 }
 
-export async function clearAllAttempts(user = null) {
+export async function clearAllAttempts(user: User | null = null): Promise<void> {
   sv(AK, []);
 
   if (isSupabaseConfigured && user) {
@@ -184,9 +181,8 @@ export async function clearAllAttempts(user = null) {
   }
 }
 
-// ---------------- STUDY MATERIALS ----------------
-export async function recordStudyMaterial(material, user = null) {
-  const localMats = ls(MK, []);
+export async function recordStudyMaterial(material: ActiveDoc, user: User | null = null): Promise<void> {
+  const localMats = ls<any[]>(MK, []);
   localMats.push({
     title: material.title || 'Pasted Material',
     topics: material.topics,
@@ -210,8 +206,7 @@ export async function recordStudyMaterial(material, user = null) {
   }
 }
 
-// ---------------- CHAT MESSAGES / DOUBTS ----------------
-export async function recordChatMessage(question, answer, language = 'en', user = null) {
+export async function recordChatMessage(question: string, answer: string, language = 'en', user: User | null = null): Promise<void> {
   if (isSupabaseConfigured && user) {
     try {
       await supabase.from('chat_messages').insert({

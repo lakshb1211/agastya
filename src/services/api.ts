@@ -1,12 +1,20 @@
-// Frontend API Client for Agastya Learning Universe Backend
-const API_BASE = import.meta.env.VITE_API_URL || '';
+import {
+  User,
+  StudyPlan,
+  ShortNotes,
+  Question,
+  QuizSubmissionResult,
+  ChatMessage
+} from '../types';
+
+const API_BASE = (import.meta as any).env?.VITE_API_URL || '';
 const TOKEN_KEY = 'agastya_jwt_token';
 
-export function getAuthToken() {
+export function getAuthToken(): string | null {
   return localStorage.getItem(TOKEN_KEY) || null;
 }
 
-export function setAuthToken(token) {
+export function setAuthToken(token: string | null) {
   if (token) {
     localStorage.setItem(TOKEN_KEY, token);
   } else {
@@ -14,8 +22,8 @@ export function setAuthToken(token) {
   }
 }
 
-async function apiRequest(endpoint, options = {}) {
-  const headers = { ...(options.headers || {}) };
+async function apiRequest<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const headers = { ...((options.headers as Record<string, string>) || {}) };
   const token = getAuthToken();
   if (token && !headers['Authorization']) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -32,7 +40,7 @@ async function apiRequest(endpoint, options = {}) {
     } catch {
       errorDetail = `HTTP ${response.status}: ${response.statusText}`;
     }
-    const error = new Error(errorDetail);
+    const error = new Error(errorDetail) as Error & { status: number };
     error.status = response.status;
     throw error;
   }
@@ -41,26 +49,26 @@ async function apiRequest(endpoint, options = {}) {
 }
 
 // ---------------- Backend Health ----------------
-let isBackendAvailable = null;
+let isBackendAvailable: boolean | null = null;
 
-export async function checkApiHealth() {
+export async function checkApiHealth(): Promise<{ connected: boolean; service?: string; version?: string; error?: string }> {
   try {
-    const res = await apiRequest('/api/health');
+    const res = await apiRequest<{ status: string; service: string; version: string }>('/api/health');
     isBackendAvailable = res.status === 'healthy';
     return { connected: true, service: res.service, version: res.version };
-  } catch (err) {
+  } catch (err: any) {
     isBackendAvailable = false;
     return { connected: false, error: err.message };
   }
 }
 
-export function getApiAvailability() {
+export function getApiAvailability(): boolean | null {
   return isBackendAvailable;
 }
 
 // ---------------- Auth ----------------
-export async function apiRegister(email, password, name, grade = 'School') {
-  const res = await apiRequest('/api/auth/register', {
+export async function apiRegister(email: string, password: string, name: string, grade = 'School'): Promise<{ token: string; user: User }> {
+  const res = await apiRequest<{ token: string; user: User }>('/api/auth/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password, name, grade }),
@@ -69,8 +77,8 @@ export async function apiRegister(email, password, name, grade = 'School') {
   return res;
 }
 
-export async function apiLogin(email, password) {
-  const res = await apiRequest('/api/auth/login', {
+export async function apiLogin(email: string, password: string): Promise<{ token: string; user: User }> {
+  const res = await apiRequest<{ token: string; user: User }>('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -79,8 +87,8 @@ export async function apiLogin(email, password) {
   return res;
 }
 
-export async function apiGetMe() {
-  return apiRequest('/api/auth/me');
+export async function apiGetMe(): Promise<User> {
+  return apiRequest<User>('/api/auth/me');
 }
 
 export function apiLogout() {
@@ -88,16 +96,26 @@ export function apiLogout() {
 }
 
 // ---------------- Streaks ----------------
-export async function apiGetStreak() {
+export async function apiGetStreak(): Promise<{ streak_count: number; last_active_date: string | null; is_active_today: boolean }> {
   return apiRequest('/api/streak');
 }
 
-export async function apiPingStreak() {
+export async function apiPingStreak(): Promise<{ streak_count: number; last_active_date: string; is_active_today: boolean }> {
   return apiRequest('/api/streak/ping', { method: 'POST' });
 }
 
 // ---------------- Materials ----------------
-export async function apiCreateMaterial(fileOrText, title = '') {
+export async function apiCreateMaterial(fileOrText: File | string, title = ''): Promise<{
+  id: string;
+  title: string;
+  created_at: string;
+  section_count: number;
+  topics: string[];
+  sources: string[];
+  study_plan: StudyPlan;
+  short_notes: ShortNotes;
+  next_step: string;
+}> {
   const formData = new FormData();
   if (typeof fileOrText === 'string') {
     formData.append('pasted_text', fileOrText);
@@ -117,15 +135,15 @@ export async function apiCreateMaterial(fileOrText, title = '') {
   });
 }
 
-export async function apiGetMaterial(materialId) {
+export async function apiGetMaterial(materialId: string) {
   return apiRequest(`/api/materials/${encodeURIComponent(materialId)}`);
 }
 
-export async function apiGetStudyPlan(materialId) {
+export async function apiGetStudyPlan(materialId: string): Promise<StudyPlan> {
   return apiRequest(`/api/materials/${encodeURIComponent(materialId)}/study-plan`);
 }
 
-export async function apiGetNotes(materialId, language = 'english', topic = null) {
+export async function apiGetNotes(materialId: string, language = 'english', topic: string | null = null): Promise<ShortNotes> {
   return apiRequest(`/api/materials/${encodeURIComponent(materialId)}/notes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -133,7 +151,11 @@ export async function apiGetNotes(materialId, language = 'english', topic = null
   });
 }
 
-export async function apiExplain(materialId, question, language = 'english') {
+export async function apiExplain(materialId: string, question: string, language = 'english'): Promise<{
+  available_in_material: boolean;
+  answer: string;
+  sources: string[];
+}> {
   return apiRequest(`/api/materials/${encodeURIComponent(materialId)}/explain`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -142,7 +164,18 @@ export async function apiExplain(materialId, question, language = 'english') {
 }
 
 // ---------------- Quizzes ----------------
-export async function apiCreateQuiz(materialId, kind = 'diagnostic', questionCount = 5, topics = []) {
+export async function apiCreateQuiz(
+  materialId: string,
+  kind = 'diagnostic',
+  questionCount = 5,
+  topics: string[] = []
+): Promise<{
+  quiz_id: string;
+  material_id: string;
+  kind: string;
+  questions: Question[];
+  submission_instructions: string;
+}> {
   return apiRequest(`/api/materials/${encodeURIComponent(materialId)}/quizzes`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -150,11 +183,11 @@ export async function apiCreateQuiz(materialId, kind = 'diagnostic', questionCou
   });
 }
 
-export async function apiGetQuiz(quizId) {
+export async function apiGetQuiz(quizId: string) {
   return apiRequest(`/api/quizzes/${encodeURIComponent(quizId)}`);
 }
 
-export async function apiSubmitQuiz(quizId, answers, confidence = 3) {
+export async function apiSubmitQuiz(quizId: string, answers: Record<string, number>, confidence = 3): Promise<QuizSubmissionResult> {
   return apiRequest(`/api/quizzes/${encodeURIComponent(quizId)}/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -162,12 +195,17 @@ export async function apiSubmitQuiz(quizId, answers, confidence = 3) {
   });
 }
 
-export async function apiGetProgress(materialId) {
+export async function apiGetProgress(materialId: string) {
   return apiRequest(`/api/materials/${encodeURIComponent(materialId)}/progress`);
 }
 
 // ---------------- Doubts Chatbot ----------------
-export async function apiChat(query, history = [], materialId = null, language = 'en') {
+export async function apiChat(
+  query: string,
+  history: ChatMessage[] = [],
+  materialId: string | null = null,
+  language = 'en'
+): Promise<{ id: string; query: string; reply: string; language: string; created_at: string }> {
   return apiRequest('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -176,6 +214,12 @@ export async function apiChat(query, history = [], materialId = null, language =
 }
 
 // ---------------- Summary ----------------
-export async function apiGetSummary() {
+export async function apiGetSummary(): Promise<{
+  total_quizzes: number;
+  overall_accuracy_percent: number;
+  streak_count: number;
+  weak_topics: string[];
+  recent_attempts: Array<{ id: string; score: number; total: number; kind: string; created_at: string }>;
+}> {
   return apiRequest('/api/progress/summary');
 }

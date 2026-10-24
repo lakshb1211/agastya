@@ -1,0 +1,8 @@
+{
+  "name": "Agastya — Your Learning Universe",
+  "description": "A calmer, smarter way to learn. AI study companion, adaptive quizzes, PDF study notes extractor, streak tracking, and personalized progress analytics.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
