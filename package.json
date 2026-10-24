@@ -5,15 +5,23 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "backend": "cd backend && .venv/bin/python run.py",
-    "test:backend": "cd backend && .venv/bin/python test_api.py",
+    "server": "node --watch server/index.js",
+    "start": "node server/index.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node server/test.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.1"
+    "@supabase/supabase-js": "^2.49.1",
+    "dotenv": "^16.6.1",
+    "express": "^5.3.0",
+    "multer": "^2.5.0",
+    "pdf-parse": "^1.1.1"
   },
   "devDependencies": {
     "vite": "^6.2.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

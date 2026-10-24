@@ -156,11 +156,11 @@ function updateNavbarAuth(user, status) {
   badge.innerHTML = status.connected ? '☁ Supabase' : '💾 Local Mode';
   navRight.prepend(badge);
 
-  // Check if Agastya FastAPI backend is live
+  // Check if the Agastya API server is live
   checkApiHealth().then((apiStatus) => {
     if (apiStatus && apiStatus.connected) {
       badge.className = 'sb-badge connected';
-      badge.title = 'Agastya FastAPI Backend running at 127.0.0.1:8000';
+      badge.title = 'Agastya API server connected';
       badge.innerHTML = '⚡ API Connected';
     }
   });

@@ -1,66 +1,67 @@
 # Agastya — Your Learning Universe (Frontend & Backend)
 
-A modern, offline-first study companion web application built with a **Vite + Vanilla JS** cosmic frontend and a high-performance **FastAPI (Python)** backend, featuring grounded material ingestion (PDF/Images/Text), cited study plans, dynamic diagnostic quizzes, streak tracking, and AI-powered doubt solving.
+A modern, offline-first study companion web application built with a **Vite + Vanilla JS** cosmic frontend and a **Node.js (Express)** backend, featuring grounded material ingestion (PDF/Images/Text), cited study plans, dynamic diagnostic quizzes, streak tracking, and AI-powered doubt solving.
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Start the FastAPI Backend
-Set a unique backend signing key before starting the server. Copy `.env.example` to `.env`, then generate a key with:
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-Set the resulting value as `AGASTYA_SECRET_KEY` in `.env`. The `.env` file is local-only and must not be committed.
+Requires Node.js 20 or newer.
 
-```bash
-# Using npm shortcut:
-npm run backend
-
-# Or directly in the backend folder:
-cd backend
-.venv/bin/python run.py
-```
-Interactive API docs (Swagger): [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
-Health Check: [http://127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health)
-
-### 2. Start the Frontend
 ```bash
 npm install
-npm run dev
+cp .env.example .env      # then add GEMINI_API_KEY and AGASTYA_SECRET_KEY
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser. The Vite dev server proxies `/api`, `/materials`, and `/quizzes` requests to the backend server.
+Generate a signing key with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. The `.env` file is local-only and must not be committed.
 
-### 3. Run Automated Backend Test Suite
+### Development (two terminals)
 ```bash
-npm run test:backend
+npm run server   # API on http://127.0.0.1:8000 (restarts on file changes)
+npm run dev      # frontend on http://localhost:3000, proxies /api to the server
 ```
-Executes automated end-to-end tests across all 11 backend endpoints.
+
+### Production (one process)
+```bash
+npm run build    # builds the frontend into dist/
+npm start        # serves dist/ and the API on $PORT (default 8000)
+```
+
+### Tests
+```bash
+npm test                     # every API endpoint, AI disabled
+AGASTYA_TEST_AI=1 npm test   # same, using your real AI keys
+```
 
 ---
 
 ## 🧠 Backend Architecture & Endpoints
 
-The backend is located in [`backend/`](./backend/) with modular architecture:
-- [`backend/app/main.py`](./backend/app/main.py): FastAPI app, CORS middleware, lifespan events, and route definitions.
-- [`backend/app/extractor.py`](./backend/app/extractor.py): PDF parsing via PyMuPDF, image OCR extraction via Tesseract, topic analysis, SVG concept map generation, and study plan builder.
-- [`backend/app/ai_service.py`](./backend/app/ai_service.py): AI integration (OpenAI / Gemini) with high-quality local deterministic fallback if no API key is provided.
-- [`backend/app/quiz_service.py`](./backend/app/quiz_service.py): Diagnostic & weak-topic multiple choice question generation with citations, scoring, and progress calculations.
-- [`backend/app/security.py`](./backend/app/security.py): PBKDF2 password hashing and HMAC-SHA256 JWT authentication.
-- [`backend/app/db.py`](./backend/app/db.py): SQLite with WAL mode, foreign keys, and indexes for `users`, `streaks`, `materials`, `quizzes`, `attempts`, and `chats`.
+The backend lives in [`server/`](./server/):
+- [`server/app.js`](./server/app.js): Express app, routes, validation, static frontend hosting.
+- [`server/extractor.js`](./server/extractor.js): PDF text extraction (pdf-parse), passage splitting, topic analysis, SVG concept map, study plan builder.
+- [`server/ai.js`](./server/ai.js): Gemini (Interactions API, with overload fallback models) then OpenAI, with a deterministic local fallback when no key works.
+- [`server/quiz.js`](./server/quiz.js): Cited multiple-choice quiz generation, grading, weak-topic progress.
+- [`server/security.js`](./server/security.js): PBKDF2 password hashing and HMAC-SHA256 JWT authentication.
+- [`server/db.js`](./server/db.js): JSON-file datastore (`data/agastya.json`) for users, streaks, materials, quizzes, attempts and chats. No native modules, so it runs on any Node host.
 
 ### Key Endpoints:
 - `GET /api/health` — Service health & version status.
 - `POST /api/auth/register` & `POST /api/auth/login` — Student authentication with JWT.
 - `GET /api/streak` & `POST /api/streak/ping` — Daily learning streak tracker.
-- `POST /api/materials` (or `POST /materials`) — Upload PDF/image or paste text; extracts topics, generates 3-day study plan, revision notes, and SVG concept map.
+- `POST /api/materials` — Upload a PDF or paste text; extracts topics, generates a 3-day study plan, revision notes, and SVG concept map.
 - `GET /api/materials/{material_id}/study-plan` — Retrieve personalized 3-day revision plan.
 - `POST /api/materials/{material_id}/notes` — Multilingual revision notes with citations (English, Hindi, Spanish, French, Chinese).
-- `POST /api/materials/{material_id}/explain` — Strict grounded Q&A with direct passage/page citations and anti-hallucination guardrail.
+- `POST /api/materials/{material_id}/explain` — Strict grounded Q&A with passage/page citations and anti-hallucination guardrail.
 - `POST /api/materials/{material_id}/quizzes` — Create 4-choice diagnostic or weak-topic quizzes.
 - `POST /api/quizzes/{quiz_id}/submit` — Grade answers, identify weak topics (<70%), and log attempt.
 - `POST /api/chat` — Doubt-solving conversational AI tutor grounded in uploaded materials.
 - `GET /api/progress/summary` — Student mastery and attempt statistics.
+
+### Deploying
+- **Google AI Studio:** Build → Add files (+) → Import from GitHub, then add `GEMINI_API_KEY` (and `AGASTYA_SECRET_KEY`) in the Secrets panel and deploy.
+- **Cloud Run:** `gcloud run deploy agastya --source . --region us-central1 --allow-unauthenticated --set-env-vars GEMINI_API_KEY=...,AGASTYA_SECRET_KEY=...` (uses the included `Dockerfile`).
+
+Note: the datastore is a file on the container's disk. On Cloud Run it resets when the container restarts; point `AGASTYA_DATA_DIR` at a mounted volume to keep data.
 
 ---
 
@@ -105,6 +106,8 @@ agastya-learning-universe/
 ├── package.json                 # Project dependencies & scripts
 ├── .env.example                 # Supabase environment variables template
 ├── .env                         # Local-only environment settings (not committed)
+├── Dockerfile                   # One-container build for Cloud Run / AI Studio
+├── server/                      # Node.js (Express) API + static hosting
 ├── supabase/
 │   └── schema.sql               # PostgreSQL schema, triggers & RLS policies
 └── src/
